@@ -1,0 +1,13 @@
+# Secrets — only .env.example is committed
+.env
+*.env
+!.env.example
+
+# n8n's own state when run from this folder (database, encryption key, logs)
+.n8n/
+n8n-data/
+
+# Node, for the test harness
+node_modules/
+
+.DS_Store
