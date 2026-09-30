@@ -1,0 +1,11 @@
+{
+  "receivedAt": "2026-09-30T09:05:00.000Z",
+  "name": "Daniel Moore",
+  "email": "daniel.moore@example.com",
+  "company": "Northwind Logistics",
+  "service": "Artificial intelligence integration",
+  "budget": "$6,000 – $12,000",
+  "deadline": "2027-01-31",
+  "source": "LinkedIn",
+  "message": "We receive around 300 delivery notes a day as scanned PDFs and a team re-types them into our ERP. Could you build something that reads them, extracts the shipment data and pushes it to our ERP's REST API, with a human check on the uncertain ones? We work in UTC, so the overlap with Madagascar suits us."
+}
