@@ -1,0 +1,78 @@
+// Build Notion page — the Code node that turns a lead and its qualification into the
+// body of POST /v1/pages.
+//
+// The database it writes to is described in docs/notion.md: one row per lead, the
+// fields Hery sorts and filters on as properties, the long texts (message, draft) in
+// the page itself.
+
+const { TYPE_LABELS, BUDGET_LABELS, URGENCY_LABELS } = require("./labels.js");
+
+// Notion refuses a rich_text over 2,000 characters.
+const MAX_TEXT = 2000;
+
+function text(content) {
+  return [{ type: "text", text: { content: String(content || "").slice(0, MAX_TEXT) } }];
+}
+
+function heading(content) {
+  return { object: "block", type: "heading_2", heading_2: { rich_text: text(content) } };
+}
+
+function paragraphs(content) {
+  // One block per paragraph, each under the 2,000-character cap.
+  return String(content || "—")
+    .split(/\n{2,}/)
+    .flatMap((part) => part.match(/[\s\S]{1,2000}/g) || [])
+    .map((part) => ({ object: "block", type: "paragraph", paragraph: { rich_text: text(part) } }));
+}
+
+function bullets(items) {
+  return items.map((item) => ({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: text(item) } }));
+}
+
+function select(name) {
+  return name ? { select: { name: String(name).replace(/,/g, " ").slice(0, 100) } } : { select: null };
+}
+
+function notionPage(lead, q, databaseId) {
+  const properties = {
+    Name: { title: text(lead.name) },
+    Email: { email: lead.email || null },
+    Company: { rich_text: text(lead.company) },
+    Phone: { phone_number: lead.phone || null },
+    Score: { number: q.score },
+    Status: select(q.isSpam ? "Spam" : "Nouveau"),
+    Type: select(TYPE_LABELS[q.projectType]),
+    "Budget given": { rich_text: text(lead.budget) },
+    "Budget fit": select(BUDGET_LABELS[q.budgetFit]),
+    Urgency: select(URGENCY_LABELS[q.urgency]),
+    Language: select(q.language),
+    Source: select(lead.source),
+    Summary: { rich_text: text(q.summary) },
+    Received: { date: { start: lead.receivedAt } },
+  };
+  if (lead.deadline) properties.Deadline = { date: { start: lead.deadline } };
+
+  const children = [
+    heading("Message"),
+    ...paragraphs(lead.message),
+    ...(lead.other ? [heading("Autres précisions"), ...paragraphs(lead.other)] : []),
+    ...(lead.features ? [heading("Fonctionnalités cochées"), ...paragraphs(lead.features)] : []),
+    heading("Pourquoi ce score"),
+    ...bullets(q.scoreReasons.length ? q.scoreReasons : ["—"]),
+    ...(q.missingInfo.length ? [heading("À demander"), ...bullets(q.missingInfo)] : []),
+    ...(q.replyDraft ? [heading(`Brouillon — ${q.replySubject}`), ...paragraphs(q.replyDraft)] : []),
+    ...(q.error ? [heading("Qualification incomplète"), ...paragraphs(`Gemini n'a pas pu qualifier ce message (${q.error}). À lire à la main.`)] : []),
+  ];
+
+  // Notion accepts at most 100 blocks per request.
+  return { parent: { database_id: databaseId }, properties, children: children.slice(0, 100) };
+}
+
+/* @n8n — uncommented by scripts/build.mjs, where $input and $env exist
+return $input.all().map((item) => ({
+  json: { ...item.json, page: notionPage(item.json.lead, item.json.qualification, $env.NOTION_DATABASE_ID) },
+}));
+@end */
+
+module.exports = { notionPage };
