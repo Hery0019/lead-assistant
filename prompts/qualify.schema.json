@@ -1,0 +1,27 @@
+{
+  "type": "OBJECT",
+  "properties": {
+    "language": { "type": "STRING", "enum": ["fr", "en", "mg", "other"] },
+    "summary": { "type": "STRING" },
+    "projectType": {
+      "type": "STRING",
+      "enum": ["showcase", "ecommerce", "webapp", "api", "ai_automation", "architecture", "excel_to_app", "other"]
+    },
+    "budgetFit": { "type": "STRING", "enum": ["realistic", "tight", "unrealistic", "unknown"] },
+    "urgency": { "type": "STRING", "enum": ["low", "normal", "high"] },
+    "score": { "type": "INTEGER", "minimum": 0, "maximum": 100 },
+    "scoreReasons": { "type": "ARRAY", "items": { "type": "STRING" }, "maxItems": 3 },
+    "missingInfo": { "type": "ARRAY", "items": { "type": "STRING" } },
+    "isSpam": { "type": "BOOLEAN" },
+    "replySubject": { "type": "STRING" },
+    "replyDraft": { "type": "STRING" }
+  },
+  "required": [
+    "language", "summary", "projectType", "budgetFit", "urgency", "score",
+    "scoreReasons", "missingInfo", "isSpam", "replySubject", "replyDraft"
+  ],
+  "propertyOrdering": [
+    "language", "summary", "projectType", "budgetFit", "urgency", "score",
+    "scoreReasons", "missingInfo", "isSpam", "replySubject", "replyDraft"
+  ]
+}
