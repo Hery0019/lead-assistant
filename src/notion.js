@@ -7,6 +7,15 @@
 
 const { TYPE_LABELS, BUDGET_LABELS, URGENCY_LABELS } = require("./labels.js");
 
+// The database's properties and their Notion types — what docs/notion.md asks you to
+// create, what notionPage writes, and what scripts/check.mjs compares a real database to.
+const PROPERTIES = {
+  Name: "title", Email: "email", Company: "rich_text", Phone: "phone_number", Score: "number",
+  Status: "select", Type: "select", "Budget given": "rich_text", "Budget fit": "select",
+  Urgency: "select", Language: "select", Source: "select", Summary: "rich_text",
+  Received: "date", Deadline: "date",
+};
+
 // Notion refuses a rich_text over 2,000 characters.
 const MAX_TEXT = 2000;
 
@@ -75,4 +84,4 @@ return $input.all().map((item) => ({
 }));
 @end */
 
-module.exports = { notionPage };
+module.exports = { notionPage, PROPERTIES };

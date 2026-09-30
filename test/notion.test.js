@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { validate } = require("../src/validate.js");
-const { notionPage } = require("../src/notion.js");
+const { notionPage, PROPERTIES } = require("../src/notion.js");
 
 const { lead } = validate(require("../samples/lead-fr.json"));
 const q = {
@@ -46,4 +46,13 @@ test("the page body holds the message, the reasons, the questions and the draft"
   assert.ok(texts.includes("Quel prestataire de paiement ?"));
   assert.ok(texts.includes("Brouillon — Votre boutique en ligne"));
   assert.ok(texts.includes("Bonjour Sandrine,"));
+});
+
+test("the page writes exactly the declared properties, each with its declared type", () => {
+  const page = notionPage(lead, q, "db");
+  assert.deepEqual(Object.keys(page.properties).sort(), Object.keys(PROPERTIES).sort());
+  for (const [name, value] of Object.entries(page.properties)) {
+    const type = Object.keys(value)[0];
+    assert.equal(type, PROPERTIES[name], `${name} is written as ${type}`);
+  }
 });
