@@ -1,0 +1,11 @@
+{
+  "name": "lead-assistant",
+  "private": true,
+  "description": "n8n workflows that qualify imhery.dev contact-form leads with Gemini, file them in Notion and notify on Telegram",
+  "license": "MIT",
+  "author": "Herinirina Olivier RAKOTONARIVO",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}
