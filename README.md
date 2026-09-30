@@ -68,6 +68,17 @@ cp .env.example .env          # fill in N8N_ENCRYPTION_KEY, NOTION_DATABASE_ID, 
 docker compose up -d          # n8n on http://localhost:5678
 ```
 
+Before n8n, check the three services — keys, bot, database — in one command. It asks
+for the three secrets with the input hidden (or reads `GEMINI_API_KEY`,
+`TELEGRAM_BOT_TOKEN`, `NOTION_TOKEN` from the environment), never prints or saves them,
+sends you one Telegram test message, compares the Notion database to what the workflow
+writes, and runs one real qualification of `samples/lead-en.json` so you see the prompt
+at work:
+
+```bash
+npm run check                 # Node 24, no dependency
+```
+
 Open n8n, create the owner account, then:
 
 ### 1. Credentials

@@ -8,6 +8,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test \"test/**/*.test.{js,mjs}\"",
-    "e2e": "node test/e2e/run.mjs"
+    "e2e": "node test/e2e/run.mjs",
+    "check": "node scripts/check.mjs"
   }
 }
