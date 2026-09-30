@@ -6,6 +6,8 @@
   "author": "Herinirina Olivier RAKOTONARIVO",
   "engines": { "node": ">=24" },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/**/*.test.{js,mjs}\"",
+    "e2e": "node test/e2e/run.mjs"
   }
 }
