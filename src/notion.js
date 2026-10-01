@@ -28,9 +28,13 @@ function heading(content) {
 }
 
 function paragraphs(content) {
-  // One block per paragraph, each under the 2,000-character cap.
+  // One block per line, each under the 2,000-character cap. Every line break counts:
+  // Gemini writes its drafts with single ones, and splitting on blank lines only ran
+  // "Bonjour Lova," the body and "Cordialement, Hery" into one block.
   return String(content || "—")
-    .split(/\n{2,}/)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
     .flatMap((part) => part.match(/[\s\S]{1,2000}/g) || [])
     .map((part) => ({ object: "block", type: "paragraph", paragraph: { rich_text: text(part) } }));
 }

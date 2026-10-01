@@ -61,3 +61,11 @@ test("the page says which model qualified the lead", () => {
   const texts = notionPage(lead, { ...q, model: "gemini-3.6-flash" }, "db").children.map((b) => b[b.type].rich_text[0].text.content);
   assert.ok(texts.includes("Qualifié par gemini-3.6-flash."));
 });
+
+test("a draft written with single line breaks keeps its greeting, body and sign-off apart", () => {
+  const draft = "Bonjour Lova,\nMerci pour votre message.\nJe vous propose un échange de 30 minutes.\nCordialement,\nHery";
+  const page = notionPage(lead, { ...q, replyDraft: draft }, "db");
+  const start = page.children.findIndex((b) => b.type === "heading_2" && b.heading_2.rich_text[0].text.content.startsWith("Brouillon"));
+  const lines = page.children.slice(start + 1, start + 6).map((b) => b.paragraph.rich_text[0].text.content);
+  assert.deepEqual(lines, ["Bonjour Lova,", "Merci pour votre message.", "Je vous propose un échange de 30 minutes.", "Cordialement,", "Hery"]);
+});
