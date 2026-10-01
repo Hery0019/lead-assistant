@@ -1,8 +1,11 @@
 # n8n Community Edition, self-hosted: free, no n8n Cloud account.
 #
 #   cp .env.example .env        # then fill it in
-#   docker compose up -d        # n8n alone, on http://localhost:5678
-#   docker compose --profile tunnel up -d   # plus a Cloudflare Tunnel, for the Worker
+#   docker compose up -d        # n8n on http://localhost:5678
+#
+# n8n only makes outgoing requests — it collects the leads queued by the portfolio's
+# Worker every 5 minutes — so nothing here is reachable from the internet, and the PC
+# can be switched off: what arrives meanwhile waits in the queue.
 #
 # The version is pinned: a workflow exported from one n8n version is only guaranteed to
 # import into the same one. Bump it on purpose, re-import, re-test.
@@ -12,32 +15,20 @@ services:
     image: docker.n8n.io/n8nio/n8n:2.41.4
     restart: unless-stopped
     ports:
-      - "127.0.0.1:5678:5678"   # local only; the outside world comes in through the tunnel
+      - "127.0.0.1:5678:5678"   # the editor, for this machine only
     env_file: .env
     environment:
       GENERIC_TIMEZONE: ${TZ:-Indian/Antananarivo}
       TZ: ${TZ:-Indian/Antananarivo}
-      # The public address n8n prints for its webhooks — the tunnel's hostname when there
-      # is one, localhost otherwise.
-      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
-      # The workflows read their non-secret settings (Notion database, Telegram chat,
-      # model name) from the environment. Secrets never go here: they are n8n credentials,
-      # encrypted with N8N_ENCRYPTION_KEY.
+      # The workflows read their non-secret settings (queue address, Notion database,
+      # Telegram chat, model) from the environment. Secrets never go here: they are n8n
+      # credentials, encrypted with N8N_ENCRYPTION_KEY.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
     volumes:
       - n8n-data:/home/node/.n8n
       - ./workflows:/workflows:ro   # so `n8n import:workflow` can reach the exports
-
-  tunnel:
-    image: cloudflare/cloudflared:2026.9.3
-    profiles: [tunnel]
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env to use the tunnel}
-    depends_on: [n8n]
 
 volumes:
   n8n-data:
