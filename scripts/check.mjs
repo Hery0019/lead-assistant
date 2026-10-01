@@ -2,14 +2,18 @@
 //
 //   npm run check
 //
-// Settings come from .env (NOTION_DATABASE_ID, TELEGRAM_CHAT_ID, GEMINI_MODEL). The three
+// Settings come from .env (NOTION_DATABASE_ID, TELEGRAM_CHAT_ID, GEMINI_MODELS). The three
 // secrets come from the environment — GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, NOTION_TOKEN —
 // or, when one is missing, are asked for with the input hidden. They are never printed
 // and never written anywhere: this process holds them and exits.
 //
 // What it does:
-//   Gemini    the key and the model answer, then one real qualification of
-//             samples/lead-en.json with the workflow's own prompt, printed in full
+//   Gemini    one real qualification of samples/lead-en.json with the workflow's own
+//             prompt, walking the GEMINI_MODELS chain as the workflow does, printed in full
+//
+//   npm run check -- --models
+//             lists the Gemini text models this key can use, asks each for a tiny JSON
+//             answer, and suggests the GEMINI_MODELS line to put in .env
 //   Telegram  the token is valid, and the bot can write to you (sends one test message)
 //   Notion    the database exists, the connection can see it, and each property has
 //             the name and the type the workflow writes
@@ -93,57 +97,102 @@ export function notionIssues(database, expected = PROPERTIES) {
 
 // ------------------------------------------------------------------- checks
 
-const RETRY_DELAYS_MS = (process.env.CHECK_RETRY_DELAYS_MS || "5000,10000,20000").split(",").map(Number);
+/** GEMINI_MODELS (or the older GEMINI_MODEL) as the workflow reads it: a list, preferred first. */
+export function modelChain(env) {
+  return (env.GEMINI_MODELS || env.GEMINI_MODEL || "gemini-3.6-flash").split(",").map((m) => m.trim()).filter(Boolean);
+}
 
-async function checkGemini(key, model, base) {
+const geminiHeaders = (key) => ({ "x-goog-api-key": key, "Content-Type": "application/json" });
+const failure = (res) => `${res.status} ${(res.body?.error?.message || "").split("\n")[0]}`.trim();
+
+/** Same walk as the workflow: each model in turn, the first answer wins. */
+async function checkGemini(key, models, base) {
   console.log("\nGemini");
   if (!key) return fail("no key given", "create one at https://aistudio.google.com/apikey"), false;
-  const headers = { "x-goog-api-key": key, "Content-Type": "application/json" };
-
-  const info = await call(`${base}/v1beta/models/${model}`, { headers });
-  if (info.status !== 200) {
-    const msg = info.body?.error?.message || JSON.stringify(info.body);
-    const hint = info.status === 400 || info.status === 403 ? "the key is wrong or disabled — copy it again from AI Studio"
-      : info.status === 404 ? `no model "${model}" — check GEMINI_MODEL in .env`
-      : info.status === 0 ? "no connection to Google — check the network" : null;
-    return fail(`${info.status} ${msg}`, hint), false;
-  }
-  ok(`key accepted, model ${info.body.displayName || model}`);
+  console.log(dim(`    chain: ${models.join(" → ")}`));
 
   const prompt = readFileSync(join(root, "prompts/qualify.md"), "utf8");
   const schema = JSON.parse(readFileSync(join(root, "prompts/qualify.schema.json"), "utf8"));
   const { lead } = validate(JSON.parse(readFileSync(join(root, "samples/lead-en.json"), "utf8")));
-  const started = Date.now();
-  // 429 (free-tier quota) and 503 (model overloaded) are temporary: retry like the
-  // workflow does, a little longer each time, before calling it a failure.
-  let res;
-  for (const wait of [0, ...RETRY_DELAYS_MS]) {
-    if (wait) {
-      console.log(`    ${dim(`${res.status} — retrying in ${wait / 1000} s`)}`);
-      await new Promise((r) => setTimeout(r, wait));
+  const body = JSON.stringify(geminiRequest(lead, prompt, schema));
+
+  for (const model of models) {
+    const started = Date.now();
+    const res = await call(`${base}/v1beta/models/${model}:generateContent`, { method: "POST", headers: geminiHeaders(key), body });
+    if (res.status === 400 || res.status === 403) {
+      return fail(`${model}: ${failure(res)}`, "the key is wrong or disabled — copy it again from AI Studio"), false;
     }
-    res = await call(`${base}/v1beta/models/${model}:generateContent`, {
-      method: "POST", headers, body: JSON.stringify(geminiRequest(lead, prompt, schema)),
-    });
-    if (res.status !== 429 && res.status !== 503) break;
+    if (res.status !== 200) {
+      console.log(`    ${dim(`${model}: ${failure(res)} — next model`)}`);
+      continue;
+    }
+    const q = readQualification(res.body);
+    if (q.error) { console.log(`    ${dim(`${model}: answer unreadable (${q.error}) — next model`)}`); continue; }
+    ok(`${q.model || model} qualified samples/lead-en.json in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    console.log(dim([
+      `      score ${q.score}/100 · ${q.projectType} · budget ${q.budgetFit} · urgency ${q.urgency} · ${q.language}${q.isSpam ? " · SPAM" : ""}`,
+      `      ${q.summary}`,
+      ...q.scoreReasons.map((r) => `      + ${r}`),
+      ...q.missingInfo.map((m) => `      ? ${m}`),
+      `      ── ${q.replySubject}`,
+      ...q.replyDraft.split("\n").map((l) => `      ${l}`),
+    ].join("\n")));
+    return true;
   }
-  if (res.status !== 200) {
-    const hint = res.status === 429 ? "free-tier quota reached — wait a minute and retry"
-      : res.status === 503 ? "Google's servers are overloaded — retry in a few minutes, or set GEMINI_MODEL to another model in .env"
-      : null;
-    return fail(`qualification failed: ${res.status} ${res.body?.error?.message || ""}`, hint), false;
+  return fail("no model of the chain answered", "overloaded or unavailable — run npm run check -- --models to pick others for GEMINI_MODELS"), false;
+}
+
+/* Text-only Gemini models that can answer generateContent — not embeddings, speech,
+   images, live audio or computer use, which the workflow has no use for. */
+const NOT_FOR_TEXT = /embedding|tts|image|imagen|veo|live|audio|robotics|computer-use|aqa/i;
+
+/** Ranks what answered: flash before flash-lite before the rest, newest version first. */
+export function rankModels(names) {
+  const family = (n) => (/flash-lite/.test(n) ? 1 : /flash/.test(n) ? 0 : 2);
+  const version = (n) => Number((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const preview = (n) => (/preview|exp/.test(n) ? 1 : 0);
+  return [...names].sort((a, b) => family(a) - family(b) || preview(a) - preview(b) || version(b) - version(a) || a.localeCompare(b));
+}
+
+/** --models: what this key can use right now, and the GEMINI_MODELS line to paste. */
+async function listModels(key, base, current) {
+  console.log("\nGemini models available to this key");
+  if (!key) return fail("no key given", "create one at https://aistudio.google.com/apikey"), false;
+  const list = await call(`${base}/v1beta/models?pageSize=1000`, { headers: geminiHeaders(key) });
+  if (list.status !== 200) return fail(failure(list), "the key is wrong or disabled — copy it again from AI Studio"), false;
+
+  const candidates = (list.body.models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map((m) => m.name.replace(/^models\//, ""))
+    .filter((n) => n.startsWith("gemini") && !NOT_FOR_TEXT.test(n));
+  console.log(dim(`    ${candidates.length} text models listed; asking each for a one-field JSON answer…`));
+
+  // The same kind of request the workflow makes — JSON held to a schema — kept tiny.
+  const probe = JSON.stringify({
+    contents: [{ role: "user", parts: [{ text: "Answer with ok set to true." }] }],
+    generationConfig: { responseMimeType: "application/json", responseSchema: { type: "OBJECT", properties: { ok: { type: "BOOLEAN" } }, required: ["ok"] }, maxOutputTokens: 20 },
+  });
+  const results = [];
+  for (const model of candidates) {
+    const started = Date.now();
+    const res = await call(`${base}/v1beta/models/${model}:generateContent`, { method: "POST", headers: geminiHeaders(key), body: probe });
+    results.push({ model, status: res.status, ms: Date.now() - started, why: res.status === 200 ? "" : failure(res).slice(4, 90) });
   }
-  const q = readQualification(res.body);
-  if (q.error) return fail(`answer unreadable: ${q.error}`), false;
-  ok(`real qualification of samples/lead-en.json in ${((Date.now() - started) / 1000).toFixed(1)} s`);
-  console.log(dim([
-    `      score ${q.score}/100 · ${q.projectType} · budget ${q.budgetFit} · urgency ${q.urgency} · ${q.language}${q.isSpam ? " · SPAM" : ""}`,
-    `      ${q.summary}`,
-    ...q.scoreReasons.map((r) => `      + ${r}`),
-    ...q.missingInfo.map((m) => `      ? ${m}`),
-    `      ── ${q.replySubject}`,
-    ...q.replyDraft.split("\n").map((l) => `      ${l}`),
-  ].join("\n")));
+
+  const width = Math.max(...results.map((r) => r.model.length), 10);
+  for (const r of results) {
+    const mark = r.status === 200 ? green("✓") : r.status === 503 || r.status === 429 ? dim("~") : red("✗");
+    console.log(`  ${mark} ${r.model.padEnd(width)}  ${String(r.status).padStart(3)}  ${r.status === 200 ? `${(r.ms / 1000).toFixed(1)} s` : dim(r.why)}`);
+  }
+  // Answering now first; overloaded (503) or out of quota (429) next — reachable, only
+  // busy — and never what the key cannot use at all.
+  const answered = rankModels(results.filter((r) => r.status === 200).map((r) => r.model));
+  const busy = rankModels(results.filter((r) => r.status === 503 || r.status === 429).map((r) => r.model));
+  const chain = [...answered, ...busy].slice(0, 4);
+  console.log(dim("\n  ✓ answered   ~ reachable but overloaded or out of quota   ✗ not usable with this key"));
+  if (!chain.length) return fail("no model usable right now — retry in a few minutes"), false;
+  console.log(`\n  Current: GEMINI_MODELS=${current.join(",")}`);
+  console.log(`  Suggested, in .env:\n\n    ${green(`GEMINI_MODELS=${chain.join(",")}`)}\n`);
   return true;
 }
 
@@ -204,11 +253,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   console.log("Secrets are read here, never shown, never saved.");
   const geminiKey = await secret("GEMINI_API_KEY", "Gemini API key");
+  const geminiBase = env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com";
+
+  if (process.argv.includes("--models")) {
+    process.exitCode = (await listModels(geminiKey, geminiBase, modelChain(env))) ? 0 : 1;
+    process.exit();
+  }
+
   const telegramToken = await secret("TELEGRAM_BOT_TOKEN", "Telegram bot token");
   const notionToken = await secret("NOTION_TOKEN", "Notion API token");
 
   const results = [
-    await checkGemini(geminiKey, env.GEMINI_MODEL || "gemini-3.6-flash", env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com"),
+    await checkGemini(geminiKey, modelChain(env), geminiBase),
     await checkTelegram(telegramToken, env.TELEGRAM_CHAT_ID, env.TELEGRAM_API_BASE || "https://api.telegram.org"),
     await checkNotion(notionToken, env.NOTION_DATABASE_ID, env.NOTION_API_BASE || "https://api.notion.com"),
   ];
