@@ -153,60 +153,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendQuery": false,
-        "queryParameters": {
-          "parameters": []
-        },
-        "sendHeaders": false,
-        "headerParameters": {
-          "parameters": []
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.request) }}",
-        "options": {
-          "timeout": 30000
-        }
-      },
-      "id": "ca9a801d-1883-4f00-ae74-e89b1839af73",
-      "name": "Qualify with Gemini",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1320,
-        200
-      ],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "49e432e9-4eea-41",
-          "name": "Gemini API key"
-        }
-      },
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "resume": "timeInterval",
-        "amount": "={{ Number($env.GEMINI_RETRY_WAIT_S || 15) }}",
-        "unit": "seconds"
-      },
-      "id": "fb3bbfb6-107b-4a80-a7f7-84090e0b0f14",
-      "name": "Wait before retrying",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [
-        1540,
-        360
-      ],
-      "webhookId": "f72dca92-3288-41c1-ac9a-e8851a7923e5"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent",
+        "url": "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ ((list) => list[Math.min(0, list.length - 1)])(($env.GEMINI_MODELS || $env.GEMINI_MODEL || \"gemini-3.6-flash\").split(\",\").map((m) => m.trim()).filter(Boolean)) }}:generateContent",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendQuery": false,
@@ -224,13 +171,124 @@
           "timeout": 30000
         }
       },
-      "id": "2f537af1-9f31-49dc-a2aa-b2712c8bb611",
-      "name": "Qualify with Gemini (retry)",
+      "id": "d245d30d-f295-434e-a862-4e6b4607128c",
+      "name": "Gemini — model 1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "49e432e9-4eea-41",
+          "name": "Gemini API key"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ ((list) => list[Math.min(1, list.length - 1)])(($env.GEMINI_MODELS || $env.GEMINI_MODEL || \"gemini-3.6-flash\").split(\",\").map((m) => m.trim()).filter(Boolean)) }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "queryParameters": {
+          "parameters": []
+        },
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($(\"Build Gemini request\").item.json.request) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "16ae41c7-032a-4d52-a2ad-11c8cdc107d2",
+      "name": "Gemini — model 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        360
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "49e432e9-4eea-41",
+          "name": "Gemini API key"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ ((list) => list[Math.min(2, list.length - 1)])(($env.GEMINI_MODELS || $env.GEMINI_MODEL || \"gemini-3.6-flash\").split(\",\").map((m) => m.trim()).filter(Boolean)) }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "queryParameters": {
+          "parameters": []
+        },
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($(\"Build Gemini request\").item.json.request) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "87542a9e-71d0-4d64-ae01-0fa77f7f7c4a",
+      "name": "Gemini — model 3",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         1760,
-        360
+        520
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "49e432e9-4eea-41",
+          "name": "Gemini API key"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ ((list) => list[Math.min(3, list.length - 1)])(($env.GEMINI_MODELS || $env.GEMINI_MODEL || \"gemini-3.6-flash\").split(\",\").map((m) => m.trim()).filter(Boolean)) }}:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "queryParameters": {
+          "parameters": []
+        },
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($(\"Build Gemini request\").item.json.request) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "bc821931-05dc-41bf-aad8-d461e06f63c8",
+      "name": "Gemini — model 4",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        680
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -250,7 +308,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1980,
+        2200,
         200
       ]
     },
@@ -264,7 +322,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2200,
+        2420,
         200
       ]
     },
@@ -299,7 +357,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2420,
+        2640,
         200
       ],
       "credentials": {
@@ -317,7 +375,7 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        2640,
+        2860,
         420
       ]
     },
@@ -351,7 +409,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2640,
+        2860,
         200
       ]
     },
@@ -365,7 +423,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2860,
+        3080,
         300
       ]
     },
@@ -386,7 +444,7 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        3080,
+        3300,
         300
       ],
       "credentials": {
@@ -423,7 +481,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3300,
+        3520,
         300
       ],
       "credentials": {
@@ -515,14 +573,14 @@
       "main": [
         [
           {
-            "node": "Qualify with Gemini",
+            "node": "Gemini — model 1",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Qualify with Gemini": {
+    "Gemini — model 1": {
       "main": [
         [
           {
@@ -533,25 +591,50 @@
         ],
         [
           {
-            "node": "Wait before retrying",
+            "node": "Gemini — model 2",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Wait before retrying": {
+    "Gemini — model 2": {
       "main": [
         [
           {
-            "node": "Qualify with Gemini (retry)",
+            "node": "Read qualification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gemini — model 3",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Qualify with Gemini (retry)": {
+    "Gemini — model 3": {
+      "main": [
+        [
+          {
+            "node": "Read qualification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gemini — model 4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini — model 4": {
       "main": [
         [
           {

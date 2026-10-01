@@ -94,7 +94,17 @@ const isTrue = (name, position, left) =>
     options: {},
   });
 
-const GEMINI_URL = "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent";
+// GEMINI MODEL CHAIN. Free Gemini models answer 503 "high demand" for minutes at a
+// time, one model at a time. So the lead is offered to up to MODEL_ATTEMPTS models in
+// turn, taken from GEMINI_MODELS (comma-separated, first is preferred): each failure
+// goes down the node's error output to the next model. A chain shorter than
+// MODEL_ATTEMPTS repeats its last model, which then acts as a plain retry.
+// GEMINI_MODEL, the single-model setting of earlier versions, still works.
+const MODEL_ATTEMPTS = 4;
+const MODELS = '($env.GEMINI_MODELS || $env.GEMINI_MODEL || "gemini-3.6-flash").split(",").map((m) => m.trim()).filter(Boolean)';
+const modelAt = (i) => `((list) => list[Math.min(${i}, list.length - 1)])(${MODELS})`;
+const geminiUrl = (i) => `={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ ${modelAt(i)} }}:generateContent`;
+const geminiNode = (i) => `Gemini — model ${i + 1}`;
 
 // The id of the lead an item belongs to, from any node after Validate.
 const LEAD_ID = '$("Validate").item.json.id';
@@ -122,31 +132,24 @@ const nodes = [
     '"__PROMPT__"': JSON.stringify(prompt),
     '"__SCHEMA__"': JSON.stringify(schema),
   }),
-  // Gemini answers 429 or 503 under load. A failure goes to the error output, waits,
-  // and tries once more; if that fails too, the lead is still filed — marked
-  // "qualification incomplète" — so one lead can never block the queue.
-  {
-    ...http("Qualify with Gemini", [1320, 200], "POST", GEMINI_URL,
-      { auth: "Gemini API key", body: "={{ JSON.stringify($json.request) }}", retry: false }),
-    onError: "continueErrorOutput",
-  },
-  node("Wait before retrying", "n8n-nodes-base.wait", 1.1, [1540, 360], {
-    resume: "timeInterval",
-    amount: "={{ Number($env.GEMINI_RETRY_WAIT_S || 15) }}",
-    unit: "seconds",
-  }, { webhookId: uuid("wait/gemini-retry") }),
-  {
-    ...http("Qualify with Gemini (retry)", [1760, 360], "POST", GEMINI_URL,
-      { auth: "Gemini API key", body: '={{ JSON.stringify($("Build Gemini request").item.json.request) }}', retry: false }),
-    onError: "continueRegularOutput",
-  },
-  code("Read qualification", [1980, 200], ["parse.js"]),
+  // Each model gets the lead in turn; the last one continues on error, so a lead that no
+  // model could qualify is still filed — marked "qualification incomplète" — and can
+  // never block the queue.
+  ...Array.from({ length: MODEL_ATTEMPTS }, (_, i) => ({
+    ...http(geminiNode(i), [1320 + 220 * i, 200 + 160 * i], "POST", geminiUrl(i), {
+      auth: "Gemini API key",
+      body: '={{ JSON.stringify($("Build Gemini request").item.json.request) }}',
+      retry: false,
+    }),
+    onError: i < MODEL_ATTEMPTS - 1 ? "continueErrorOutput" : "continueRegularOutput",
+  })),
+  code("Read qualification", [2200, 200], ["parse.js"]),
 
-  code("Build Notion page", [2200, 200], ["labels.js", "notion.js"]),
+  code("Build Notion page", [2420, 200], ["labels.js", "notion.js"]),
   // A failure here leaves the lead in the queue for the next run, and only that lead:
   // the others carry on and are acknowledged. Nothing half-filed, nothing duplicated.
   {
-    ...http("File in Notion", [2420, 200], "POST", "={{ $env.NOTION_API_BASE }}/v1/pages", {
+    ...http("File in Notion", [2640, 200], "POST", "={{ $env.NOTION_API_BASE }}/v1/pages", {
       auth: "Notion integration token",
       headers: [{ name: "Notion-Version", value: "2022-06-28" }],
       body: "={{ JSON.stringify($json.page) }}",
@@ -154,13 +157,13 @@ const nodes = [
     }),
     onError: "continueErrorOutput",
   },
-  node("Left in the queue", "n8n-nodes-base.noOp", 1, [2640, 420], {}),
+  node("Left in the queue", "n8n-nodes-base.noOp", 1, [2860, 420], {}),
 
-  isTrue("Spam?", [2640, 200], '={{ $("Build Notion page").item.json.qualification.isSpam }}'),
-  code("Build Telegram message", [2860, 300], ["labels.js", "telegram.js"]),
+  isTrue("Spam?", [2860, 200], '={{ $("Build Notion page").item.json.qualification.isSpam }}'),
+  code("Build Telegram message", [3080, 300], ["labels.js", "telegram.js"]),
   // The Telegram node rather than a raw HTTP call: its credential holds the bot token
   // and a base URL, which is what lets the tests point it at a local mock.
-  node("Notify on Telegram", "n8n-nodes-base.telegram", 1.2, [3080, 300], {
+  node("Notify on Telegram", "n8n-nodes-base.telegram", 1.2, [3300, 300], {
     resource: "message",
     operation: "sendMessage",
     chatId: "={{ $json.request.chat_id }}",
@@ -178,7 +181,7 @@ const nodes = [
   }),
 
   // Reached by invalid leads, spam and notified leads alike: each is done with.
-  http("Acknowledge", [3300, 300], "POST", "={{ $env.LEADS_API_BASE }}/api/leads/ack", {
+  http("Acknowledge", [3520, 300], "POST", "={{ $env.LEADS_API_BASE }}/api/leads/ack", {
     auth: "Leads API token",
     body: `={{ JSON.stringify({ ids: [${LEAD_ID}] }) }}`,
   }),
@@ -196,11 +199,12 @@ const connections = {
   Validate: main("Valid?"),
   // Invalid: nothing to qualify, but it must leave the queue.
   "Valid?": main("Build Gemini request", "Acknowledge"),
-  "Build Gemini request": main("Qualify with Gemini"),
-  // Output 0: success. Output 1: the error, after which comes one more try.
-  "Qualify with Gemini": main("Read qualification", "Wait before retrying"),
-  "Wait before retrying": main("Qualify with Gemini (retry)"),
-  "Qualify with Gemini (retry)": main("Read qualification"),
+  "Build Gemini request": main(geminiNode(0)),
+  // Output 0: an answer, read at once. Output 1: an error, handed to the next model.
+  ...Object.fromEntries(Array.from({ length: MODEL_ATTEMPTS }, (_, i) => [
+    geminiNode(i),
+    i < MODEL_ATTEMPTS - 1 ? main("Read qualification", geminiNode(i + 1)) : main("Read qualification"),
+  ])),
   "Read qualification": main("Build Notion page"),
   "Build Notion page": main("File in Notion"),
   "File in Notion": main("Spam?", "Left in the queue"),
