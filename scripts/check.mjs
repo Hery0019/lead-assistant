@@ -208,7 +208,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const notionToken = await secret("NOTION_TOKEN", "Notion API token");
 
   const results = [
-    await checkGemini(geminiKey, env.GEMINI_MODEL || "gemini-2.5-flash", env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com"),
+    await checkGemini(geminiKey, env.GEMINI_MODEL || "gemini-3.6-flash", env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com"),
     await checkTelegram(telegramToken, env.TELEGRAM_CHAT_ID, env.TELEGRAM_API_BASE || "https://api.telegram.org"),
     await checkNotion(notionToken, env.NOTION_DATABASE_ID, env.NOTION_API_BASE || "https://api.notion.com"),
   ];
