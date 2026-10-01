@@ -28,7 +28,7 @@ test("Status created with Notion's Status type instead of Select is caught", () 
   assert.deepEqual(notionIssues(database({ ...PROPERTIES, Status: "status" })), ['"Status" is status, should be select']);
 });
 
-import { modelChain, rankModels } from "../scripts/check.mjs";
+import { modelChain, rankModels, suggestChain } from "../scripts/check.mjs";
 
 test("the model chain is read like the workflow reads it", () => {
   assert.deepEqual(modelChain({ GEMINI_MODELS: " gemini-3.6-flash, gemini-3.8-flash ,," }), ["gemini-3.6-flash", "gemini-3.8-flash"]);
@@ -42,4 +42,13 @@ test("suggested models: flash, then flash-lite, then the rest; stable before pre
     rankModels(["gemini-3.6-pro", "gemini-3.6-flash-lite", "gemini-3.8-flash-preview-09", "gemini-3.6-flash", "gemini-3.8-flash"]),
     ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.8-flash-preview-09", "gemini-3.6-flash-lite", "gemini-3.6-pro"],
   );
+});
+
+test("the suggested chain keeps its last place for another family, and skips -latest aliases", () => {
+  // What the first real run of --models found answering, ranked.
+  const answered = rankModels(["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"]);
+  assert.deepEqual(suggestChain(answered, ["gemini-pro-latest"]), ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]);
+  assert.deepEqual(suggestChain(["gemini-3.8-flash"], ["gemini-3.6-flash"]), ["gemini-3.8-flash", "gemini-3.6-flash"]);
+  assert.deepEqual(suggestChain(["gemini-3.8-flash", "gemini-3.6-flash-lite"]), ["gemini-3.8-flash", "gemini-3.6-flash-lite"]);
 });

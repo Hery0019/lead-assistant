@@ -154,6 +154,23 @@ export function rankModels(names) {
   return [...names].sort((a, b) => family(a) - family(b) || preview(a) - preview(b) || version(b) - version(a) || a.localeCompare(b));
 }
 
+/** Four models for GEMINI_MODELS. When Google is overloaded, a whole family of models
+ *  tends to be at once, so the last place goes to a model of another family (a lite
+ *  after flashes) when one is answering. Aliases such as gemini-flash-latest are left
+ *  out: they move to a new model without warning. */
+export function suggestChain(answered, busy = [], size = 4) {
+  const stable = (list) => list.filter((n) => !/-latest$/.test(n));
+  const pool = [...stable(answered), ...stable(busy)];
+  const chain = pool.slice(0, size);
+  const familyOf = (n) => (/flash-lite/.test(n) ? "lite" : /flash/.test(n) ? "flash" : "other");
+  const families = new Set(chain.map(familyOf));
+  if (chain.length === size && families.size === 1) {
+    const other = stable(answered).find((n) => familyOf(n) !== familyOf(chain[0]));
+    if (other) chain[size - 1] = other;
+  }
+  return chain;
+}
+
 /** --models: what this key can use right now, and the GEMINI_MODELS line to paste. */
 async function listModels(key, base, current) {
   console.log("\nGemini models available to this key");
@@ -188,7 +205,7 @@ async function listModels(key, base, current) {
   // busy — and never what the key cannot use at all.
   const answered = rankModels(results.filter((r) => r.status === 200).map((r) => r.model));
   const busy = rankModels(results.filter((r) => r.status === 503 || r.status === 429).map((r) => r.model));
-  const chain = [...answered, ...busy].slice(0, 4);
+  const chain = suggestChain(answered, busy);
   console.log(dim("\n  ✓ answered   ~ reachable but overloaded or out of quota   ✗ not usable with this key"));
   if (!chain.length) return fail("no model usable right now — retry in a few minutes"), false;
   console.log(`\n  Current: GEMINI_MODELS=${current.join(",")}`);
