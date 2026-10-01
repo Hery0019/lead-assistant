@@ -93,6 +93,8 @@ export function notionIssues(database, expected = PROPERTIES) {
 
 // ------------------------------------------------------------------- checks
 
+const RETRY_DELAYS_MS = (process.env.CHECK_RETRY_DELAYS_MS || "5000,10000,20000").split(",").map(Number);
+
 async function checkGemini(key, model, base) {
   console.log("\nGemini");
   if (!key) return fail("no key given", "create one at https://aistudio.google.com/apikey"), false;
@@ -112,11 +114,23 @@ async function checkGemini(key, model, base) {
   const schema = JSON.parse(readFileSync(join(root, "prompts/qualify.schema.json"), "utf8"));
   const { lead } = validate(JSON.parse(readFileSync(join(root, "samples/lead-en.json"), "utf8")));
   const started = Date.now();
-  const res = await call(`${base}/v1beta/models/${model}:generateContent`, {
-    method: "POST", headers, body: JSON.stringify(geminiRequest(lead, prompt, schema)),
-  });
+  // 429 (free-tier quota) and 503 (model overloaded) are temporary: retry like the
+  // workflow does, a little longer each time, before calling it a failure.
+  let res;
+  for (const wait of [0, ...RETRY_DELAYS_MS]) {
+    if (wait) {
+      console.log(`    ${dim(`${res.status} — retrying in ${wait / 1000} s`)}`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    res = await call(`${base}/v1beta/models/${model}:generateContent`, {
+      method: "POST", headers, body: JSON.stringify(geminiRequest(lead, prompt, schema)),
+    });
+    if (res.status !== 429 && res.status !== 503) break;
+  }
   if (res.status !== 200) {
-    const hint = res.status === 429 ? "free-tier quota reached — wait a minute and retry" : null;
+    const hint = res.status === 429 ? "free-tier quota reached — wait a minute and retry"
+      : res.status === 503 ? "Google's servers are overloaded — retry in a few minutes, or set GEMINI_MODEL to another model in .env"
+      : null;
     return fail(`qualification failed: ${res.status} ${res.body?.error?.message || ""}`, hint), false;
   }
   const q = readQualification(res.body);
