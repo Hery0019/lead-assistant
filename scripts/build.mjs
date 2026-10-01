@@ -58,27 +58,31 @@ const node = (name, type, typeVersion, position, parameters, extra = {}) => ({
 });
 
 const code = (name, position, files, replacements) =>
-  node(name, "n8n-nodes-base.code", 2, position, { jsCode: codeFrom(files, replacements) });
+  node(name, "n8n-nodes-base.code", 2, position, {
+    // Once per lead: each node then finds its own lead's data with $("Node").item,
+    // however many leads the run picked up.
+    mode: "runOnceForEachItem",
+    jsCode: codeFrom(files, replacements),
+  });
 
-const post = (name, position, url, { headers = [], auth } = {}) =>
+// Three tries, five seconds apart, for calls whose failure stops the run anyway (the
+// queue fetch, the ack). n8n skips these retries on a node that continues on error,
+// which is why Gemini and Notion handle failure on their own error output instead.
+const retries = { retryOnFail: true, maxTries: 3, waitBetweenTries: 5000 };
+
+const http = (name, position, method, url, { headers = [], auth, query = [], body, retry = true } = {}) =>
   node(name, "n8n-nodes-base.httpRequest", 4.2, position, {
-    method: "POST",
+    method,
     url,
     ...(auth ? { authentication: "genericCredentialType", genericAuthType: "httpHeaderAuth" } : {}),
+    sendQuery: query.length > 0,
+    queryParameters: { parameters: query },
     sendHeaders: headers.length > 0,
     headerParameters: { parameters: headers },
-    sendBody: true,
-    specifyBody: "json",
-    jsonBody: "={{ JSON.stringify($json.request ?? $json.page) }}",
+    sendBody: Boolean(body),
+    ...(body ? { specifyBody: "json", jsonBody: body } : {}),
     options: { timeout: 30000 },
-  }, {
-    ...(auth ? { credentials: credential("httpHeaderAuth", auth) } : {}),
-    // Every outside API gets three tries, five seconds apart: a 429 from a free tier is
-    // the normal case, not the exception.
-    retryOnFail: true,
-    maxTries: 3,
-    waitBetweenTries: 5000,
-  });
+  }, { ...(auth ? { credentials: credential("httpHeaderAuth", auth) } : {}), ...(retry ? retries : {}) });
 
 const isTrue = (name, position, left) =>
   node(name, "n8n-nodes-base.if", 2.2, position, {
@@ -90,48 +94,73 @@ const isTrue = (name, position, left) =>
     options: {},
   });
 
-const respond = (name, position, status, body) =>
-  node(name, "n8n-nodes-base.respondToWebhook", 1.1, position, {
-    respondWith: "json",
-    responseBody: body,
-    options: { responseCode: status },
-  });
+const GEMINI_URL = "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent";
+
+// The id of the lead an item belongs to, from any node after Validate.
+const LEAD_ID = '$("Validate").item.json.id';
 
 const nodes = [
-  node("Webhook", "n8n-nodes-base.webhook", 2, [0, 300], {
-    httpMethod: "POST",
-    path: "lead",
-    authentication: "headerAuth",
-    responseMode: "responseNode",
-    options: {},
-  }, { webhookId: uuid("webhook/lead"), credentials: credential("httpHeaderAuth", "Lead webhook token") }),
+  node("Every 5 minutes", "n8n-nodes-base.scheduleTrigger", 1.2, [0, 200], {
+    rule: { interval: [{ field: "minutes", minutesInterval: 5 }] },
+  }),
+  // To empty the queue on demand from the editor — and what `n8n execute` starts from,
+  // which the end-to-end test relies on.
+  node("Run now", "n8n-nodes-base.manualTrigger", 1, [0, 400], {}),
+  http("Fetch queued leads", [220, 300], "GET", "={{ $env.LEADS_API_BASE }}/api/leads/pending", {
+    auth: "Leads API token",
+    query: [{ name: "limit", value: "10" }],
+  }),
+  // One item per lead. An empty queue returns no item, and the run ends here.
+  node("One item per lead", "n8n-nodes-base.code", 2, [440, 300], {
+    jsCode: "return ($input.first().json.leads || []).map((lead) => ({ json: lead }));\n",
+  }),
 
-  code("Validate", [220, 300], ["validate.js"]),
-  isTrue("Valid?", [440, 300], "={{ $json.ok }}"),
-  respond("Reject", [660, 460], 400, '={{ JSON.stringify({ ok: false, error: "missing_fields", fields: $json.missing }) }}'),
-  // Answer the Worker now: everything after this runs without it waiting.
-  respond("Accept", [660, 200], 202, "={{ JSON.stringify({ ok: true, lead: $execution.id }) }}"),
+  code("Validate", [660, 300], ["validate.js"]),
+  isTrue("Valid?", [880, 300], "={{ $json.ok }}"),
 
-  code("Build Gemini request", [880, 200], ["qualify.js"], {
+  code("Build Gemini request", [1100, 200], ["qualify.js"], {
     '"__PROMPT__"': JSON.stringify(prompt),
     '"__SCHEMA__"': JSON.stringify(schema),
   }),
-  post("Qualify with Gemini", [1100, 200],
-    "={{ $env.GEMINI_API_BASE }}/v1beta/models/{{ $env.GEMINI_MODEL }}:generateContent",
-    { auth: "Gemini API key" }),
-  code("Read qualification", [1320, 200], ["parse.js"]),
+  // Gemini answers 429 or 503 under load. A failure goes to the error output, waits,
+  // and tries once more; if that fails too, the lead is still filed — marked
+  // "qualification incomplète" — so one lead can never block the queue.
+  {
+    ...http("Qualify with Gemini", [1320, 200], "POST", GEMINI_URL,
+      { auth: "Gemini API key", body: "={{ JSON.stringify($json.request) }}", retry: false }),
+    onError: "continueErrorOutput",
+  },
+  node("Wait before retrying", "n8n-nodes-base.wait", 1.1, [1540, 360], {
+    resume: "timeInterval",
+    amount: "={{ Number($env.GEMINI_RETRY_WAIT_S || 15) }}",
+    unit: "seconds",
+  }, { webhookId: uuid("wait/gemini-retry") }),
+  {
+    ...http("Qualify with Gemini (retry)", [1760, 360], "POST", GEMINI_URL,
+      { auth: "Gemini API key", body: '={{ JSON.stringify($("Build Gemini request").item.json.request) }}', retry: false }),
+    onError: "continueRegularOutput",
+  },
+  code("Read qualification", [1980, 200], ["parse.js"]),
 
-  code("Build Notion page", [1540, 200], ["labels.js", "notion.js"]),
-  post("File in Notion", [1760, 200], "={{ $env.NOTION_API_BASE }}/v1/pages", {
-    auth: "Notion integration token",
-    headers: [{ name: "Notion-Version", value: "2022-06-28" }],
-  }),
+  code("Build Notion page", [2200, 200], ["labels.js", "notion.js"]),
+  // A failure here leaves the lead in the queue for the next run, and only that lead:
+  // the others carry on and are acknowledged. Nothing half-filed, nothing duplicated.
+  {
+    ...http("File in Notion", [2420, 200], "POST", "={{ $env.NOTION_API_BASE }}/v1/pages", {
+      auth: "Notion integration token",
+      headers: [{ name: "Notion-Version", value: "2022-06-28" }],
+      body: "={{ JSON.stringify($json.page) }}",
+      retry: false,
+    }),
+    onError: "continueErrorOutput",
+  },
+  node("Left in the queue", "n8n-nodes-base.noOp", 1, [2640, 420], {}),
 
-  isTrue("Spam?", [1980, 200], "={{ $('Build Notion page').first().json.qualification.isSpam }}"),
-  code("Build Telegram message", [2200, 300], ["labels.js", "telegram.js"]),
+  isTrue("Spam?", [2640, 200], '={{ $("Build Notion page").item.json.qualification.isSpam }}'),
+  code("Build Telegram message", [2860, 300], ["labels.js", "telegram.js"]),
   // The Telegram node rather than a raw HTTP call: its credential holds the bot token
   // and a base URL, which is what lets the tests point it at a local mock.
-  node("Notify on Telegram", "n8n-nodes-base.telegram", 1.2, [2420, 300], {
+  node("Notify on Telegram", "n8n-nodes-base.telegram", 1.2, [3080, 300], {
     resource: "message",
     operation: "sendMessage",
     chatId: "={{ $json.request.chat_id }}",
@@ -142,7 +171,17 @@ const nodes = [
       parse_mode: "HTML",
       disable_web_page_preview: true,
     },
-  }, { credentials: credential("telegramApi", "Telegram bot"), retryOnFail: true, maxTries: 3, waitBetweenTries: 5000 }),
+  }, {
+    credentials: credential("telegramApi", "Telegram bot"),
+    // The lead is already safe in Notion: a failed notification must not stop the ack.
+    onError: "continueRegularOutput",
+  }),
+
+  // Reached by invalid leads, spam and notified leads alike: each is done with.
+  http("Acknowledge", [3300, 300], "POST", "={{ $env.LEADS_API_BASE }}/api/leads/ack", {
+    auth: "Leads API token",
+    body: `={{ JSON.stringify({ ids: [${LEAD_ID}] }) }}`,
+  }),
 ];
 
 // ------------------------------------------------------------------ connections
@@ -150,18 +189,25 @@ const nodes = [
 const main = (...targets) => ({ main: targets.map((t) => (t ? [{ node: t, type: "main", index: 0 }] : [])) });
 
 const connections = {
-  Webhook: main("Validate"),
+  "Every 5 minutes": main("Fetch queued leads"),
+  "Run now": main("Fetch queued leads"),
+  "Fetch queued leads": main("One item per lead"),
+  "One item per lead": main("Validate"),
   Validate: main("Valid?"),
-  "Valid?": main("Accept", "Reject"),
-  Accept: main("Build Gemini request"),
+  // Invalid: nothing to qualify, but it must leave the queue.
+  "Valid?": main("Build Gemini request", "Acknowledge"),
   "Build Gemini request": main("Qualify with Gemini"),
-  "Qualify with Gemini": main("Read qualification"),
+  // Output 0: success. Output 1: the error, after which comes one more try.
+  "Qualify with Gemini": main("Read qualification", "Wait before retrying"),
+  "Wait before retrying": main("Qualify with Gemini (retry)"),
+  "Qualify with Gemini (retry)": main("Read qualification"),
   "Read qualification": main("Build Notion page"),
   "Build Notion page": main("File in Notion"),
-  "File in Notion": main("Spam?"),
-  // Spam is filed and stops there: no notification.
-  "Spam?": main(null, "Build Telegram message"),
+  "File in Notion": main("Spam?", "Left in the queue"),
+  // Spam is filed and acknowledged, without a notification.
+  "Spam?": main("Acknowledge", "Build Telegram message"),
   "Build Telegram message": main("Notify on Telegram"),
+  "Notify on Telegram": main("Acknowledge"),
 };
 
 export const workflow = {

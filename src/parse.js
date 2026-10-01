@@ -20,6 +20,9 @@ function strings(value, max) {
 }
 
 function readQualification(response) {
+  // The HTTP node continues on error: after its retries, a failed call arrives here as
+  // { error: ... } instead of stopping the run.
+  if (response?.error) return { ...fallback(), error: "gemini_request_failed" };
   const text = response?.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("") || "";
   let raw;
   try {
@@ -53,9 +56,11 @@ function fallback() {
   };
 }
 
-/* @n8n — uncommented by scripts/build.mjs, where $input and $() exist
-const lead = $("Validate").first().json.lead;
-return $input.all().map((item) => ({ json: { lead, qualification: readQualification(item.json) } }));
+/* @n8n — uncommented by scripts/build.mjs; runs once per lead, where $json and $() exist
+// $json is Gemini's answer — or, when the call failed after its retries, the error
+// n8n passes on (the node continues on error). Either way the lead goes on.
+const { id, lead } = $("Validate").item.json;
+return { json: { id, lead, qualification: readQualification($json) } };
 @end */
 
 module.exports = { readQualification };

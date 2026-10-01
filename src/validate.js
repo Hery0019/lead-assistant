@@ -1,6 +1,6 @@
-// Validate — first Code node after the Webhook.
+// Validate — first Code node for each lead taken from the queue.
 //
-// Keeps only the fields of the contract (docs/payload.md), trims them, caps their
+// Keeps only the fields of the contract (docs/queue.md), trims them, caps their
 // length and reports the required ones that are missing. Everything the LLM later reads
 // goes through here, so nothing unexpected — no extra field, no 50 kB "message" — ever
 // reaches the prompt.
@@ -31,8 +31,8 @@ function validate(body, now = new Date()) {
   return { ok: missing.length === 0, missing, lead };
 }
 
-/* @n8n — uncommented by scripts/build.mjs, where $input and $() exist
-return $input.all().map((item) => ({ json: validate(item.json.body) }));
+/* @n8n — uncommented by scripts/build.mjs; runs once per lead, where $json exists
+return { json: { id: $json.id, ...validate($json) } };
 @end */
 
 module.exports = { validate, REQUIRED };

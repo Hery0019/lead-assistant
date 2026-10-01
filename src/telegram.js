@@ -51,11 +51,9 @@ function telegramRequest(chatId, lead, q, pageUrl) {
   };
 }
 
-/* @n8n — uncommented by scripts/build.mjs, where $input, $() and $env exist
-const { lead, qualification } = $("Build Notion page").first().json;
-return $input.all().map((item) => ({
-  json: { request: telegramRequest($env.TELEGRAM_CHAT_ID, lead, qualification, item.json.url) },
-}));
+/* @n8n — uncommented by scripts/build.mjs; runs once per lead, where $json, $() and $env exist
+const { lead, qualification } = $("Build Notion page").item.json;
+return { json: { request: telegramRequest($env.TELEGRAM_CHAT_ID, lead, qualification, $json.url) } };
 @end */
 
 module.exports = { telegramMessage, telegramRequest, escape };

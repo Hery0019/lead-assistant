@@ -22,8 +22,8 @@ function geminiRequest(lead, prompt = PROMPT, schema = SCHEMA) {
   };
 }
 
-/* @n8n — uncommented by scripts/build.mjs, where $input and $() exist
-return $input.all().map((item) => ({ json: { request: geminiRequest(item.json.lead) } }));
+/* @n8n — uncommented by scripts/build.mjs; runs once per lead, where $json exists
+return { json: { request: geminiRequest($json.lead) } };
 @end */
 
 module.exports = { geminiRequest };

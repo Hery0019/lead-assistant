@@ -62,3 +62,10 @@ test("a blocked or unreadable answer still yields a qualification, with the reas
   const truncated = readQualification({ candidates: [{ content: { parts: [{ text: '{"language":"en",' }] }, finishReason: "MAX_TOKENS" }] });
   assert.equal(truncated.error, "gemini_max_tokens");
 });
+
+test("a call that failed after its retries still yields a qualification", () => {
+  const q = readQualification({ error: { message: "503 - model overloaded" } });
+  assert.equal(q.error, "gemini_request_failed");
+  assert.equal(q.score, 0);
+  assert.equal(q.isSpam, false);
+});

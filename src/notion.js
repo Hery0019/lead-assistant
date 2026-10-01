@@ -78,10 +78,8 @@ function notionPage(lead, q, databaseId) {
   return { parent: { database_id: databaseId }, properties, children: children.slice(0, 100) };
 }
 
-/* @n8n — uncommented by scripts/build.mjs, where $input and $env exist
-return $input.all().map((item) => ({
-  json: { ...item.json, page: notionPage(item.json.lead, item.json.qualification, $env.NOTION_DATABASE_ID) },
-}));
+/* @n8n — uncommented by scripts/build.mjs; runs once per lead, where $json and $env exist
+return { json: { ...$json, page: notionPage($json.lead, $json.qualification, $env.NOTION_DATABASE_ID) } };
 @end */
 
 module.exports = { notionPage, PROPERTIES };
