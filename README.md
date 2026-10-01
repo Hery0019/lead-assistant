@@ -7,6 +7,13 @@ visitor's language, files the lead in a Notion CRM and pings me on Telegram.
 Runs on **n8n Community Edition, self-hosted** — free, no n8n Cloud subscription — and
 on free tiers only: Gemini API, Notion API, Telegram Bot API.
 
+![A visitor sends the contact form; n8n collects the lead, Gemini models 1 and 2 are
+overloaded and model 3 qualifies it; the lead lands in Notion with its score and reply
+draft, and a Telegram message follows](docs/demo.gif)
+
+*A real run, recorded on 1 October 2026: the visitor is fictitious, everything else is
+the live system — including the two overloaded Gemini models.*
+
 ```mermaid
 flowchart LR
   F[Contact form<br/>imhery.dev] --> W[Cloudflare Worker<br/>captcha · rate limit · mail]
