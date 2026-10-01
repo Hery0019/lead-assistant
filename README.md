@@ -10,32 +10,42 @@ on free tiers only: Gemini API, Notion API, Telegram Bot API.
 ```mermaid
 flowchart LR
   F[Contact form<br/>imhery.dev] --> W[Cloudflare Worker<br/>captcha · rate limit · mail]
-  W -- "POST /webhook/lead<br/>X-Lead-Token" --> H[Webhook]
-  subgraph n8n [n8n — Lead intake]
-    H --> V[Validate] --> Q{Valid?}
-    Q -- no --> R400[400 + missing fields]
-    Q -- yes --> R202[202 Accepted] --> G[Gemini<br/>qualify + draft] --> P[Read qualification]
-    P --> N[Notion page] --> S{Spam?}
+  W -- "queues the lead" --> K[(Cloudflare KV)]
+  subgraph n8n [n8n — Lead intake, every 5 min]
+    P[Fetch queued leads] --> V[Validate] --> G[Gemini<br/>qualify + draft]
+    G -- "fails" --> R[wait 15 s, retry once] --> Q
+    G --> Q[Read qualification] --> N[Notion page]
+    N --> S{Spam?}
     S -- no --> T[Telegram]
+    T --> A[Acknowledge]
+    S -- yes --> A
+    V -- invalid --> A
   end
+  K -- "GET /api/leads/pending" --> P
+  A -- "POST /api/leads/ack" --> K
 ```
 
 ## What it does with one lead
 
 1. The portfolio's Worker checks the form (honeypot, time trap, rate limit, Turnstile),
-   sends me the mail as it always has, **then** forwards the form here. If n8n is down,
-   nothing is lost: the mail already left.
-2. **Validate** keeps only the fields of the [contract](docs/payload.md), caps their
-   length and answers `400` with the missing ones. A valid lead gets `202` at once — the
-   Worker never waits on the LLM.
+   sends me the mail as it always has, **then** puts the lead in a queue (Cloudflare
+   KV). Nothing calls n8n: it comes to collect, every 5 minutes. So it can run on a PC
+   that is not always on — leads sent meanwhile wait in the queue, and nothing on the
+   PC is reachable from the internet. See [the queue contract](docs/queue.md).
+2. **Validate** keeps only the expected fields, caps their length, and sets aside a
+   lead missing a required one.
 3. **Gemini** reads it against [a prompt](prompts/qualify.md) and answers JSON held to
    [a schema](prompts/qualify.schema.json): language, one-line summary, project type,
    budget realism, urgency, a 0–100 score with its reasons, what to ask before quoting,
-   spam or not, and a reply draft in the visitor's language.
+   spam or not, and a reply draft in the visitor's language. A failed call is retried
+   once after 15 s; if it fails again the lead is still filed, marked "qualification
+   incomplète".
 4. **Notion** gets one page per lead in a [CRM database](docs/notion.md): the fields to
    sort on as properties, the message and the draft in the page.
-5. **Telegram** sends me the essentials and the link to that page. Spam is filed and
-   stops there.
+5. **Telegram** sends me the essentials and the link to that page. Spam is filed
+   without a message.
+6. **Acknowledge** removes the lead from the queue — only once Notion has it. If Notion
+   is down, that lead stays queued for the next run; the others carry on.
 
 What the notification looks like, for [`samples/lead-en.json`](samples/lead-en.json)
 (illustrative — the summary and questions are the model's):
@@ -65,7 +75,7 @@ Requirements: Docker. Nothing else is installed on the host.
 
 ```bash
 cp .env.example .env          # fill in N8N_ENCRYPTION_KEY, NOTION_DATABASE_ID, TELEGRAM_CHAT_ID
-docker compose up -d          # n8n on http://localhost:5678
+docker compose up -d          # n8n on http://localhost:5678, for this machine only
 ```
 
 Before n8n, check the three services — keys, bot, database — in one command. It asks
@@ -88,7 +98,7 @@ Created once in **Credentials → Add credential**. They are encrypted with
 
 | Name (exactly) | Type | Values |
 |---|---|---|
-| `Lead webhook token` | Header Auth | Name `X-Lead-Token`, value: a long random string (`openssl rand -hex 32`) — the same one goes to the Worker |
+| `Leads API token` | Header Auth | Name `Authorization`, value `Bearer <token>` — a long random string (`openssl rand -hex 32`); the same token is the Worker's `LEADS_API_TOKEN` secret |
 | `Gemini API key` | Header Auth | Name `x-goog-api-key`, value: a key from [Google AI Studio](https://aistudio.google.com/apikey) (free tier) |
 | `Notion integration token` | Header Auth | Name `Authorization`, value `Bearer <token>` — see [docs/notion.md](docs/notion.md) |
 | `Telegram bot` | Telegram API | Token from [@BotFather](https://t.me/BotFather); leave the base URL as is |
@@ -106,19 +116,15 @@ docker compose restart n8n
 
 ### 3. Try it
 
-```bash
-curl -i -X POST http://localhost:5678/webhook/lead \
-  -H "Content-Type: application/json" -H "X-Lead-Token: <your token>" \
-  --data @samples/lead-en.json
-```
+Open the workflow and click **Execute workflow** on the **Run now** node: it empties the
+queue at once instead of waiting for the next 5-minute tick. Each run shows in
+**Executions**, one item per lead.
 
-`202`, then the Notion page and the Telegram message a few seconds later.
+### 4. The portfolio side
 
-### 4. Open it to the Worker
-
-`docker compose --profile tunnel up -d` starts a Cloudflare Tunnel (free) with the token
-in `.env`; route its public hostname to `http://n8n:5678` and set `N8N_PUBLIC_URL`. The
-Worker then posts to `https://<hostname>/webhook/lead`. No port is opened on the machine.
+The Worker needs two routes and a KV namespace — the contract is in
+[docs/queue.md](docs/queue.md) — plus the `LEADS_API_TOKEN` secret, the same value as
+the `Leads API token` credential. That code lives in the portfolio's own repository.
 
 ## Repository
 
@@ -128,7 +134,7 @@ src/            the logic of each Code node, as plain tested JavaScript
 scripts/        build.mjs — assembles src/ and prompts/ into the n8n export
 workflows/      lead-intake.json — generated, the file you import
 samples/        requests to replay
-docs/           the webhook contract, the Notion database
+docs/           the queue contract, the Notion database
 test/           unit tests; e2e/ runs the real n8n against fake APIs
 ```
 
@@ -141,23 +147,25 @@ from node names, so an unchanged workflow rebuilds byte for byte.
 
 ```bash
 npm test                              # unit tests, no dependency
-N8N_BIN=$(which n8n) npm run e2e      # the real n8n, fake Gemini / Notion / Telegram
+N8N_BIN=$(which n8n) npm run e2e      # the real n8n, a fake queue and fake Gemini / Notion / Telegram
 ```
 
-The end-to-end run imports the export into a throwaway n8n, publishes it and checks:
-`403` without the token, `400` with the missing fields and no API called, `202` then
-Gemini → Notion → Telegram with the right headers and bodies, and spam filed without a
-notification. Nothing leaves the machine.
+The end-to-end run imports the export into a throwaway n8n and runs it with `n8n
+execute` against a local server playing the Worker's queue, Gemini, Notion and
+Telegram. Four leads at once — qualified, spam, invalid, and one whose Gemini call fails
+twice — all filed or dropped as they should and acknowledged; Notion down leaves the
+lead queued without crashing the run; Notion back lets it through; an empty queue costs
+one request. Nothing leaves the machine.
 
 ## Security
 
-- The webhook refuses any request without the shared token, before any node runs.
+- Nothing reaches n8n from outside: it only makes outgoing requests, and its editor
+  listens on `127.0.0.1`. The queue answers only to the bearer token.
 - Only the contract's fields reach the prompt, trimmed and capped; the prompt tells the
   model the enquiry is data, never instructions; the answer is parsed against the
   schema and every field falls back to a safe value.
 - Secrets are n8n credentials, encrypted at rest. `.env` holds settings only and is
   gitignored; a test fails if anything shaped like an API key lands in the export.
-- n8n listens on `127.0.0.1` only; the outside world comes in through the tunnel.
 
 ## License
 
