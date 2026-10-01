@@ -13,7 +13,7 @@ flowchart LR
   W -- "queues the lead" --> K[(Cloudflare KV)]
   subgraph n8n [n8n — Lead intake, every 5 min]
     P[Fetch queued leads] --> V[Validate] --> G[Gemini<br/>qualify + draft]
-    G -- "fails" --> R[wait 15 s, retry once] --> Q
+    G -- "overloaded" --> G2[next model<br/>up to 4] --> Q
     G --> Q[Read qualification] --> N[Notion page]
     N --> S{Spam?}
     S -- no --> T[Telegram]
@@ -37,9 +37,11 @@ flowchart LR
 3. **Gemini** reads it against [a prompt](prompts/qualify.md) and answers JSON held to
    [a schema](prompts/qualify.schema.json): language, one-line summary, project type,
    budget realism, urgency, a 0–100 score with its reasons, what to ask before quoting,
-   spam or not, and a reply draft in the visitor's language. A failed call is retried
-   once after 15 s; if it fails again the lead is still filed, marked "qualification
-   incomplète".
+   spam or not, and a reply draft in the visitor's language. Free Gemini models answer
+   503 "high demand" for minutes at a time, so `GEMINI_MODELS` lists several: when one
+   fails the next gets the lead, up to four. If none answers, the lead is still filed,
+   marked "qualification incomplète". The Notion page and the Telegram message say which
+   model did the work.
 4. **Notion** gets one page per lead in a [CRM database](docs/notion.md): the fields to
    sort on as properties, the message and the draft in the page.
 5. **Telegram** sends me the essentials and the link to that page. Spam is filed
@@ -87,6 +89,7 @@ at work:
 
 ```bash
 npm run check                 # Node 24, no dependency
+npm run check -- --models     # which Gemini models your key can use → a GEMINI_MODELS line
 ```
 
 Open n8n, create the owner account, then:
