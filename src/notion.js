@@ -69,6 +69,7 @@ function notionPage(lead, q, databaseId) {
     ...(lead.features ? [heading("Fonctionnalités cochées"), ...paragraphs(lead.features)] : []),
     heading("Pourquoi ce score"),
     ...bullets(q.scoreReasons.length ? q.scoreReasons : ["—"]),
+    ...(q.model ? paragraphs(`Qualifié par ${q.model}.`) : []),
     ...(q.missingInfo.length ? [heading("À demander"), ...bullets(q.missingInfo)] : []),
     ...(q.replyDraft ? [heading(`Brouillon — ${q.replySubject}`), ...paragraphs(q.replyDraft)] : []),
     ...(q.error ? [heading("Qualification incomplète"), ...paragraphs(`Gemini n'a pas pu qualifier ce message (${q.error}). À lire à la main.`)] : []),

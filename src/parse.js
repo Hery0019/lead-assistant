@@ -45,6 +45,8 @@ function readQualification(response) {
     isSpam: raw.isSpam === true,
     replySubject: typeof raw.replySubject === "string" ? raw.replySubject.trim() : "",
     replyDraft: typeof raw.replyDraft === "string" ? raw.replyDraft.trim() : "",
+    // Which model of the GEMINI_MODELS chain answered — Gemini names it in every reply.
+    model: typeof response.modelVersion === "string" ? response.modelVersion : null,
     error: null,
   };
 }
@@ -52,7 +54,7 @@ function readQualification(response) {
 function fallback() {
   return {
     language: "other", summary: "", projectType: "other", budgetFit: "unknown", urgency: "normal",
-    score: 0, scoreReasons: [], missingInfo: [], isSpam: false, replySubject: "", replyDraft: "",
+    score: 0, scoreReasons: [], missingInfo: [], isSpam: false, replySubject: "", replyDraft: "", model: null,
   };
 }
 

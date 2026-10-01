@@ -56,3 +56,8 @@ test("the page writes exactly the declared properties, each with its declared ty
     assert.equal(type, PROPERTIES[name], `${name} is written as ${type}`);
   }
 });
+
+test("the page says which model qualified the lead", () => {
+  const texts = notionPage(lead, { ...q, model: "gemini-3.6-flash" }, "db").children.map((b) => b[b.type].rich_text[0].text.content);
+  assert.ok(texts.includes("Qualifié par gemini-3.6-flash."));
+});

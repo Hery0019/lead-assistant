@@ -36,3 +36,8 @@ test("the request is ready for sendMessage", () => {
   assert.equal(req.parse_mode, "HTML");
   assert.ok(req.text.length <= 4096);
 });
+
+test("the model that qualified the lead is named, when there is one", () => {
+  assert.match(telegramMessage(lead, { ...q, model: "gemini-3.8-flash" }, null), /<i>Qualifié par gemini-3\.8-flash<\/i>/);
+  assert.doesNotMatch(telegramMessage(lead, { ...q, model: null }, null), /Qualifié par/);
+});

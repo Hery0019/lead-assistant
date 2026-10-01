@@ -10,7 +10,7 @@ const prompt = fs.readFileSync(path.join(__dirname, "../prompts/qualify.md"), "u
 const schema = JSON.parse(fs.readFileSync(path.join(__dirname, "../prompts/qualify.schema.json"), "utf8"));
 const { lead } = validate(require("../samples/lead-en.json"));
 
-const answer = (obj) => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] }, finishReason: "STOP" }] });
+const answer = (obj, modelVersion = "gemini-3.6-flash") => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] }, finishReason: "STOP" }], modelVersion });
 const good = {
   language: "en", summary: "Northwind veut automatiser la saisie de bons de livraison.", projectType: "ai_automation",
   budgetFit: "realistic", urgency: "normal", score: 86, scoreReasons: ["Besoin clair", "Budget donné", "Entreprise réelle"],
@@ -68,4 +68,9 @@ test("a call that failed after its retries still yields a qualification", () => 
   assert.equal(q.error, "gemini_request_failed");
   assert.equal(q.score, 0);
   assert.equal(q.isSpam, false);
+});
+
+test("the model that answered is recorded, and nothing is claimed when none did", () => {
+  assert.equal(readQualification(answer(good, "gemini-3.8-flash")).model, "gemini-3.8-flash");
+  assert.equal(readQualification({ error: { message: "503" } }).model, null);
 });

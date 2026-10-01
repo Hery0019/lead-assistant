@@ -33,6 +33,7 @@ function telegramMessage(lead, q, pageUrl) {
     `Urgence : ${URGENCY_LABELS[q.urgency]}${lead.deadline ? ` — échéance ${lead.deadline}` : ""}`,
     `Langue : ${q.language} · Source : ${escape(lead.source)}`,
   ];
+  if (q.model) lines.push(`<i>Qualifié par ${escape(q.model)}</i>`);
   if (q.missingInfo.length) lines.push("", "<b>À demander</b>", ...q.missingInfo.map((m) => `• ${escape(m)}`));
   if (q.error) lines.push("", `<i>Qualification incomplète (${escape(q.error)}) — à lire à la main.</i>`);
   if (pageUrl) lines.push("", `<a href="${escape(pageUrl)}">Ouvrir la fiche et le brouillon dans Notion</a>`);
