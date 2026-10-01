@@ -59,8 +59,10 @@ const mock = createServer((req, res) => {
     }
     if (url.pathname.startsWith("/gemini/")) {
       const lead = JSON.parse(body.contents[0].parts[0].text);
-      if (lead.name === "Gemini Down") return send(503, { error: { message: "The model is overloaded." } });
-      return send(200, { candidates: [{ content: { parts: [{ text: JSON.stringify(qualificationFor(lead)) }] }, finishReason: "STOP" }] });
+      const model = url.pathname.match(/models\/([^:]+):/)[1];
+      // model-a is overloaded for everyone; "Gemini Down" finds every model overloaded.
+      if (model === "model-a" || lead.name === "Gemini Down") return send(503, { error: { message: "The model is overloaded." } });
+      return send(200, { candidates: [{ content: { parts: [{ text: JSON.stringify(qualificationFor(lead)) }] }, finishReason: "STOP" }], modelVersion: model });
     }
     if (url.pathname === "/notion/v1/pages") {
       if (notionDown) return send(500, { message: "Notion is down" });
@@ -83,8 +85,7 @@ const env = {
   N8N_DIAGNOSTICS_ENABLED: "false",
   N8N_RUNNERS_BROKER_PORT: "15680",
   LEADS_API_BASE: `http://127.0.0.1:${MOCK_PORT}/worker`,
-  GEMINI_MODEL: "gemini-test",
-  GEMINI_RETRY_WAIT_S: "1",
+  GEMINI_MODELS: "model-a, model-b, model-c",
   GEMINI_API_BASE: `http://127.0.0.1:${MOCK_PORT}/gemini`,
   NOTION_API_BASE: `http://127.0.0.1:${MOCK_PORT}/notion`,
   NOTION_DATABASE_ID: "db-e2e",
@@ -136,10 +137,12 @@ async function main() {
   assert.equal(pending[0].headers.authorization, `Bearer ${LEADS_TOKEN}`);
 
   const gemini = calls.filter((c) => c.path.startsWith("/gemini/"));
-  assert.ok(gemini.every((c) => c.path === "/gemini/v1beta/models/gemini-test:generateContent"));
+  assert.ok(gemini.every((c) => /^\/gemini\/v1beta\/models\/model-[abc]:generateContent$/.test(c.path)), gemini.map((c) => c.path).join());
+  const modelsFor = (name) => gemini.filter((c) => JSON.parse(c.body.contents[0].parts[0].text).name === name).map((c) => c.path.match(/model-[abc]/)[0]);
+  assert.deepEqual(modelsFor("Sandrine Rabe"), ["model-a", "model-b"], "model-a overloaded → model-b");
+  assert.deepEqual(modelsFor("Gemini Down"), ["model-a", "model-b", "model-c", "model-c"], "every model, the last one twice");
   assert.ok(gemini.every((c) => c.headers["x-goog-api-key"] === "fake-gemini-key"));
   assert.ok(gemini.every((c) => /You triage the enquiries/.test(c.body.systemInstruction.parts[0].text)));
-  assert.equal(gemini.filter((c) => JSON.parse(c.body.contents[0].parts[0].text).name === "Gemini Down").length, 2, "a failed Gemini call is tried once more");
   assert.equal(gemini.some((c) => JSON.parse(c.body.contents[0].parts[0].text).name === ""), false, "invalid lead never reaches Gemini");
 
   const pages = of("/notion/v1/pages");
@@ -147,6 +150,7 @@ async function main() {
   assert.deepEqual(Object.keys(byName).sort(), ["Gemini Down", "Sandrine Rabe", "Spammer"]);
   assert.ok(pages.every((p) => p.headers.authorization === "Bearer fake-notion-token" && p.headers["notion-version"] === "2022-06-28"));
   assert.equal(byName["Sandrine Rabe"].properties.Score.number, 82);
+  assert.ok(JSON.stringify(byName["Sandrine Rabe"].children).includes("Qualifié par model-b."));
   assert.equal(byName["Spammer"].properties.Status.select.name, "Spam");
   assert.ok(JSON.stringify(byName["Gemini Down"].children).includes("gemini_request_failed"));
 
@@ -160,7 +164,7 @@ async function main() {
   const acked = of("/worker/api/leads/ack").flatMap((c) => c.body.ids);
   assert.equal(acked.length, 4);
   assert.deepEqual(queue, [], "the queue is empty");
-  console.log("✓ run 1: 4 leads — qualified, spam filed silently, invalid dropped, Gemini failure filed — all acknowledged");
+  console.log("✓ run 1: 4 leads — model-a overloaded so model-b qualified, spam filed silently, invalid dropped, all models down filed as incomplete — all acknowledged");
 
   // 2. Notion down: the lead is neither notified nor acknowledged — it stays queued —
   //    and the run itself does not crash.
