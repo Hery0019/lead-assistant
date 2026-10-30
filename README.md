@@ -1,7 +1,7 @@
 # lead-assistant
 
 An n8n automation that reads every message sent through the contact form of
-[imhery.dev](https://imhery.dev), qualifies it with an LLM, drafts a reply in the
+[iamhery.dev](https://iamhery.dev), qualifies it with an LLM, drafts a reply in the
 visitor's language, files the lead in a Notion CRM and pings me on Telegram.
 
 Runs on **n8n Community Edition, self-hosted** — free, no n8n Cloud subscription — and
