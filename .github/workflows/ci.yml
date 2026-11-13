@@ -31,7 +31,7 @@ jobs:
           node-version: 24
       # Same version as docker-compose.yml: an export only imports reliably into the
       # n8n that made it.
-      - name: Install n8n 2.41.4
-        run: npm install --global --no-audit --no-fund n8n@2.41.4
+      - name: Install n8n 2.47.6
+        run: npm install --global --no-audit --no-fund n8n@2.47.6
       - name: End-to-end, fake APIs
         run: N8N_BIN="$(which n8n)" npm run e2e
