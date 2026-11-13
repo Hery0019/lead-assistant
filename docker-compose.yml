@@ -12,7 +12,7 @@
 
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:2.41.4
+    image: docker.n8n.io/n8nio/n8n:2.47.6
     restart: unless-stopped
     ports:
       - "127.0.0.1:5678:5678"   # the editor, for this machine only
