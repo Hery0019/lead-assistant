@@ -1,11 +1,20 @@
 # lead-assistant
 
+**The problem:** a freelancer's contact form fills an inbox with a mix of real projects,
+vague one-liners and SEO spam. Each one has to be read, judged and answered by hand, so
+the good leads wait behind the noise and replies go out late.
+
 An n8n automation that reads every message sent through the contact form of
 [iamhery.dev](https://iamhery.dev), qualifies it with an LLM, drafts a reply in the
 visitor's language, files the lead in a Notion CRM and pings me on Telegram.
 
 Runs on **n8n Community Edition, self-hosted** — free, no n8n Cloud subscription — and
 on free tiers only: Gemini API, Notion API, Telegram Bot API.
+
+**Use it for your own site:** the workflow is not tied to mine. Rewrite the first
+paragraphs of [the prompt](prompts/qualify.md) with who you are and what you offer, have
+your form's backend serve [the queue contract](docs/queue.md) (two routes), then follow
+[Run it](#run-it).
 
 ![A visitor sends the contact form; n8n collects the lead, Gemini models 1 and 2 are
 overloaded and model 3 qualifies it; the lead lands in Notion with its score and reply
@@ -16,7 +25,7 @@ the live system — including the two overloaded Gemini models.*
 
 ```mermaid
 flowchart LR
-  F[Contact form<br/>imhery.dev] --> W[Cloudflare Worker<br/>captcha · rate limit · mail]
+  F[Contact form<br/>iamhery.dev] --> W[Cloudflare Worker<br/>captcha · rate limit · mail]
   W -- "queues the lead" --> K[(Cloudflare KV)]
   subgraph n8n [n8n — Lead intake, every 5 min]
     P[Fetch queued leads] --> V[Validate] --> G[Gemini<br/>qualify + draft]
